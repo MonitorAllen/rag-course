@@ -60,7 +60,7 @@ func RunREPL(ctx context.Context, client *llm.Client, opts Options) error {
 		fmt.Println()
 
 		if err != nil {
-			fmt.Println(os.Stderr, "error: ", err)
+			fmt.Fprintln(os.Stderr, "error: ", err)
 			history = history[:len(history)-1]
 			continue
 		}
