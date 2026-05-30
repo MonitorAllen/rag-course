@@ -2,11 +2,14 @@ package pgvector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"rag-course/vector"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pgvector/pgvector-go"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 )
 
@@ -98,4 +101,114 @@ func ensureExtension(ctx context.Context, dsn string) error {
 
 	_, err = conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector")
 	return err
+}
+
+func (s *Store) Upsert(ctx context.Context, docs []vector.Document) error {
+	if len(docs) == 0 {
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const stmt = `
+		INSERT INTO documents (id, content, metadata, embedding)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO UPDATE SET
+			content = EXCLUDED.content,
+			metadata = EXCLUDED.metadata,
+			embedding = EXCLUDED.embedding
+	`
+	for _, d := range docs {
+		meta, err := marsahlMetadata(d.Metadata)
+		if err != nil {
+			return fmt.Errorf("metadata for %s: %w", d.ID, err)
+		}
+		if _, err := tx.Exec(ctx, stmt, d.ID, d.Content, meta, pgvector.NewVector(d.Embedding)); err != nil {
+			return fmt.Errorf("upsert: %s: %w", d.ID, err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func marsahlMetadata(m map[string]string) ([]byte, error) {
+	if len(m) == 0 {
+		return []byte("{}"), nil
+	}
+
+	return json.Marshal(m)
+}
+
+func unmarshalMetadata(raw []byte, dst *map[string]string) error {
+	if len(raw) == 0 {
+		*dst = nil
+		return nil
+	}
+	return json.Unmarshal(raw, dst)
+}
+
+func (s *Store) Query(ctx context.Context, embedding []float32, topK int) ([]vector.Result, error) {
+	if topK <= 0 {
+		return nil, nil
+	}
+
+	const stmt = `
+		SELECT id, content, metadata, embedding <=> $1 as distance
+		FROM documents
+		ORDER BY embedding <=> $1
+		LIMIT $2
+	`
+
+	rows, err := s.pool.Query(ctx, stmt, pgvector.NewVector(embedding), topK)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []vector.Result
+	for rows.Next() {
+		var (
+			r        vector.Result
+			metaRaw  []byte
+			distance float64
+		)
+
+		if err := rows.Scan(&r.ID, &r.Content, &metaRaw, &distance); err != nil {
+			return nil, err
+		}
+		if err := unmarshalMetadata(metaRaw, &r.Metadata); err != nil {
+			return nil, fmt.Errorf("metadata for %s: %w", r.ID, err)
+		}
+		r.Score = float32(1 - distance)
+		results = append(results, r)
+	}
+
+	return results, rows.Err()
+}
+
+func (s *Store) Delete(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	_, err := s.pool.Exec(ctx, `DELETE FROM documents WHERE id = ANY($1)`, ids)
+	return err
+}
+
+func (s *Store) DeleteBySource(ctx context.Context, source string) error {
+	if source == "" {
+		return nil
+	}
+
+	_, err := s.pool.Exec(ctx, `DELETE FROM documents WHERE metadata->>'source' = $1`, source)
+	return err
+}
+
+func (s *Store) Close() error {
+	s.pool.Close()
+	return nil
 }
