@@ -29,8 +29,8 @@ func (s *Store) migrate(ctx context.Context, dim int) error {
 			id		TEXT PRIMARY KEY,
 			content		TEXT NOT NULL,
 			metadata	JSONB NOT NULL DEFAULT '{}'::JSONB,
-			embedding	VECTOR(%d) NOT NULL
-			created_at	TIMESTAMPZ NOT NULL DEFAULT now()
+			embedding	VECTOR(%d) NOT NULL,
+			created_at	TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`,
 			dim,
 		),

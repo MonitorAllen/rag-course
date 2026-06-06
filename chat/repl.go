@@ -87,7 +87,7 @@ func startSpinner(laber string) *spinner {
 		for {
 			select {
 			case <-s.stop:
-				fmt.Print("\r\033[K]")
+				fmt.Print("\r\033[K")
 				return
 			case <-t.C:
 				fmt.Printf("\r%s %s", frames[i%len(frames)], laber)
