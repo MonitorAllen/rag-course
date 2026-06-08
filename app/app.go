@@ -11,6 +11,7 @@ import (
 	"rag-course/config"
 	"rag-course/ingest"
 	"rag-course/llm"
+	"rag-course/rag"
 	"rag-course/vector"
 	"rag-course/vector/pgvector"
 )
@@ -50,7 +51,18 @@ func Run(parent context.Context, cfg config.Config) error {
 		logger.Printf("vector store ready")
 	}
 
-	replErr := chat.RunREPL(ctx, client, chat.Options{
+	var retriever *rag.Retriever
+	if store != nil {
+		// [配置检索增强生成组件]
+		// 当向量数据库 (store) 可用时，初始化 RAG 检索器。
+		// Retriever 将负责结合当前的对话历史生成检索词，从 store 获取相关切片，格式化后作为上下文提供给 LLM。
+		retriever = rag.New(embedder, store, rag.Options{
+			TopK:     5, // 每次查询返回最相似的前 5 个文档切片
+			Rewriter: rag.NewRewriter(client), // 使用专门的 LLM 将多轮对话历史重写为独立的搜索词，提高查询命中率
+		})
+	}
+
+	replErr := chat.RunREPL(ctx, client, retriever, chat.Options{
 		SystemPromptFile: cfg.SystemPromptFile,
 	})
 

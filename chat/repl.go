@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"rag-course/llm"
+	"rag-course/rag"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +18,7 @@ type Options struct {
 	SystemPromptFile string
 }
 
-func RunREPL(ctx context.Context, client *llm.Client, opts Options) error {
+func RunREPL(ctx context.Context, client *llm.Client, retriever *rag.Retriever, opts Options) error {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -51,7 +52,22 @@ func RunREPL(ctx context.Context, client *llm.Client, opts Options) error {
 
 		spin := startSpinner("thinking...")
 		var stopOnce sync.Once
-		reply, err := client.ChatStream(ctx, history, func(s string) {
+
+		// 针对当前对话尝试获取相关的文档内容，以实现检索增强生成 (RAG)
+		turn := history
+		if retriever != nil {
+			contextText, retErr := retriever.Retrieve(ctx, history)
+			if retErr != nil {
+				fmt.Fprintln(os.Stderr, "retrieval error: ", retErr)
+			} else if contextText != "" {
+				// 如果成功检索到相关文档，将文档内容作为上下文注入到最后的提问中。
+				// 这里生成了一个新的 turn 切片，以便大模型能基于上下文进行回答，
+				// 同时原始的 history 仍然只保留用户的原生问题，不会被超长的文档内容污染。
+				turn = withInlineContext(history, contextText)
+			}
+		}
+
+		reply, err := client.ChatStream(ctx, turn, func(s string) {
 			stopOnce.Do(spin.Stop)
 			fmt.Print(s)
 		})
@@ -68,6 +84,29 @@ func RunREPL(ctx context.Context, client *llm.Client, opts Options) error {
 		history = append(history, reply)
 
 	}
+}
+
+// withInlineContext 接收当前完整的对话历史和检索到的文档上下文文本。
+// 它通过将上下文与用户的最后一个问题合并，构建一条供 LLM 消费的最终消息。
+func withInlineContext(history []llm.Message, contextText string) []llm.Message {
+	if len(history) == 0 || contextText == "" {
+		return history
+	}
+	last := history[len(history)-1]
+	if last.Role != "user" {
+		return history
+	}
+
+	// 拷贝切片，确保不修改传入的原始 history
+	out := make([]llm.Message, len(history))
+	copy(out, history)
+
+	// 修改最后一条 User 消息，将查询出的上下文前置，明确提示模型结合上下文解答该问题。
+	out[len(out)-1] = llm.Message{
+		Role:    "user",
+		Content: contextText + "\n\n--- 问题 ---\n\n" + last.Content,
+	}
+	return out
 }
 
 type spinner struct {

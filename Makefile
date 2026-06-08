@@ -1,5 +1,5 @@
-.PHONY: dev
+.PHONY: server
 
 
-dev:
+server:
 	@go run ./cmd/rag
