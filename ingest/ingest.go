@@ -35,11 +35,11 @@ func processOne(ctx context.Context, path string, opts Options, embedder llm.Emb
 		return fmt.Errorf("read: %w", err)
 	}
 
-	_, err = processContent(ctx, filepath.Base(path), raw, opts, embedder, store)
+	_, err = ProcessContent(ctx, filepath.Base(path), raw, opts, embedder, store)
 	return err
 }
 
-func processContent(ctx context.Context, source string, content []byte, opts Options, embeder llm.Embedder, store vector.Store) (int, error) {
+func ProcessContent(ctx context.Context, source string, content []byte, opts Options, embeder llm.Embedder, store vector.Store) (int, error) {
 	if embeder == nil {
 		return 0, errors.New("embedder is required")
 	}
@@ -107,6 +107,10 @@ func processContent(ctx context.Context, source string, content []byte, opts Opt
 	}
 
 	return len(chunks), nil
+}
+
+func IsSupported(name string) bool {
+	return supportedFormat(name)
 }
 
 func supportedFormat(path string) bool {

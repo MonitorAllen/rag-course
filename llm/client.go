@@ -7,6 +7,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 type Message struct {
@@ -75,6 +76,23 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	}
 
 	return Message{Role: role, Content: content.String()}, nil
+}
+
+func toResponsesInput(messages []Message) responses.ResponseInputParam {
+	out := make(responses.ResponseInputParam, 0, len(messages))
+
+	for _, m := range messages {
+		out = append(out, responses.ResponseInputItemUnionParam{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role: responses.EasyInputMessageRole(m.Role),
+				Content: responses.EasyInputMessageContentUnionParam{
+					OfString: openai.String(m.Content),
+				},
+			},
+		})
+	}
+
+	return out
 }
 
 func toSDKMessages(messages []Message) []openai.ChatCompletionMessageParamUnion {
