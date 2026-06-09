@@ -14,6 +14,7 @@ import (
 	"rag-course/rag"
 	"rag-course/vector"
 	"rag-course/vector/pgvector"
+	"rag-course/web"
 )
 
 func Run(parent context.Context, cfg config.Config) error {
@@ -57,9 +58,29 @@ func Run(parent context.Context, cfg config.Config) error {
 		// 当向量数据库 (store) 可用时，初始化 RAG 检索器。
 		// Retriever 将负责结合当前的对话历史生成检索词，从 store 获取相关切片，格式化后作为上下文提供给 LLM。
 		retriever = rag.New(embedder, store, rag.Options{
-			TopK:     5, // 每次查询返回最相似的前 5 个文档切片
+			TopK:     5,                       // 每次查询返回最相似的前 5 个文档切片
 			Rewriter: rag.NewRewriter(client), // 使用专门的 LLM 将多轮对话历史重写为独立的搜索词，提高查询命中率
 		})
+	}
+
+	if cfg.HTTPAddr != "" {
+		srv, err := web.New(client, embedder, retriever, &web.Options{
+			Addr:             cfg.HTTPAddr,
+			SystemPromptFile: cfg.SystemPromptFile,
+			Store:            store,
+			ProcessedDir:     cfg.ProcessedDir,
+			ImagesDir:        cfg.ImagesDir,
+		})
+		if err != nil {
+			logger.Printf("[web] failed to create server: %v", err)
+		} else {
+			wg.Go(func() {
+				if err := srv.Run(ctx, cfg.HTTPAddr); err != nil && ctx.Err() == nil {
+					logger.Printf("[web] server stopped: %v", err)
+				}
+			})
+			logger.Printf("web UI available at http://localhost%s/chat", cfg.HTTPAddr)
+		}
 	}
 
 	replErr := chat.RunREPL(ctx, client, retriever, chat.Options{

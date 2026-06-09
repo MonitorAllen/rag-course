@@ -53,4 +53,3 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 
 	return vecs, nil
 }
-

@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}}</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #eef4fb;
+  --surface: #ffffff;
+  --surface-2: #f7f9fc;
+  --line: #d9e2ee;
+  --ink: #172033;
+  --muted: #65748b;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --focus: #7aa7ff;
+  --success: #0f766e;
+  --warn: #b45309;
+  --shadow: 0 18px 50px rgba(36, 50, 78, 0.12);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 14px;
+  width: min(100% - 28px, 840px);
+  margin: 0 auto;
+  padding: 22px 0 18px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+}
+
+.brand-mark {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 760;
+}
+
+.status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.chat-shell {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.log {
+  min-height: 58vh;
+  max-height: calc(100vh - 176px);
+  overflow-y: auto;
+  padding: 22px;
+  scroll-behavior: smooth;
+}
+
+.empty {
+  height: 100%;
+  min-height: 44vh;
+  display: grid;
+  place-items: center;
+  color: #8190a6;
+  font-size: 0.94rem;
+}
+
+.message {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: #e7edf6;
+  color: #53657d;
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.message.user .avatar {
+  order: 2;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.bubble {
+  max-width: min(72ch, 78%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 11px 13px;
+  line-height: 1.58;
+  overflow-wrap: anywhere;
+}
+
+.message.user .bubble {
+  border-color: #bcd3ff;
+  background: #ecf4ff;
+}
+
+.bubble p {
+  margin: 0 0 0.8em;
+}
+
+.bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.bubble pre {
+  overflow: auto;
+  border-radius: 8px;
+  padding: 12px;
+  background: #111827;
+  color: #f8fafc;
+}
+
+.bubble code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 34px;
+  border: 1px solid #cad7e8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 5px 8px;
+  color: #334155;
+  font-size: 0.84rem;
+}
+
+.attachment img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #eef2f7;
+}
+
+.attachment-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 2px;
+}
+
+.attachment-tray {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.attachment-tray[data-visible="true"] {
+  display: flex;
+}
+
+.tray-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 5px 8px 5px 10px;
+  color: #26364f;
+  font-size: 0.84rem;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+}
+
+.tray-chip[data-kind="document"] {
+  border-color: rgba(15, 118, 110, 0.3);
+}
+
+.tray-chip[data-kind="image"] {
+  border-color: rgba(180, 83, 9, 0.3);
+}
+
+.remove-attachment {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+}
+
+.composer-row {
+  display: grid;
+  grid-template-columns: 48px 48px 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.icon-button,
+.send-button {
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #526175;
+  display: inline-grid;
+  place-items: center;
+  box-shadow: 0 8px 24px rgba(36, 50, 78, 0.08);
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.icon-button {
+  width: 48px;
+}
+
+.icon-button:hover {
+  border-color: #b8c7da;
+  background: #f8fbff;
+  color: #1f2d40;
+  transform: translateY(-1px);
+}
+
+.icon-button.is-loading {
+  color: var(--accent);
+}
+
+.input-wrap {
+  min-width: 0;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 4px rgba(37, 99, 235, 0.08);
+}
+
+.input-wrap:focus-within {
+  box-shadow: 0 0 0 4px rgba(122, 167, 255, 0.32);
+}
+
+.message-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 18px;
+  font-size: 0.98rem;
+}
+
+.message-input::placeholder {
+  color: #5f6f85;
+}
+
+.message-input:focus-visible {
+  outline: none;
+}
+
+.send-button {
+  min-width: 78px;
+  padding: 0 20px;
+  border: 0;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 760;
+}
+
+.send-button:hover {
+  background: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
+.sr-only,
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .page {
+    width: min(100% - 18px, 840px);
+    padding-top: 12px;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .status {
+    display: none;
+  }
+
+  .log {
+    min-height: calc(100vh - 174px);
+    max-height: calc(100vh - 174px);
+    padding: 14px;
+  }
+
+  .bubble {
+    max-width: 84%;
+  }
+
+  .composer-row {
+    grid-template-columns: 42px 42px 1fr 64px;
+    gap: 7px;
+  }
+
+  .icon-button,
+  .send-button {
+    height: 42px;
+  }
+
+  .icon-button {
+    width: 42px;
+  }
+
+  .input-wrap {
+    height: 44px;
+  }
+
+  .send-button {
+    min-width: 64px;
+    padding: 0 12px;
+  }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+      <circle cx="32" cy="36" r="25" fill="#2f9ab7"></circle>
+      <path d="M14 30c0-12 8-22 20-23 3 10-3 21-18 28z" fill="#b64e50"></path>
+      <path d="M35 6c12 2 19 12 18 24-12 0-21-8-18-24z" fill="#73c46b"></path>
+      <path d="M28 8c10 0 18 8 18 18S38 44 28 44 10 36 10 26 18 8 28 8z" fill="#ffc83d"></path>
+      <path d="M28 10v34M12 26h34M18 14l24 24M42 14 18 38" stroke="#fff7c7" stroke-width="2" stroke-linecap="round"></path>
+      <path d="M11 36c4 18 22 25 39 13" fill="none" stroke="#e8fbff" stroke-width="2" stroke-linecap="round"></path>
+    </svg>
+    <h1 class="title">{{.Title}}</h1>
+    <div id="status" class="status" role="status" aria-live="polite">Ready</div>
+  </header>
+
+  <section class="chat-shell" aria-label="Chat conversation">
+    <div id="log" class="log" aria-live="polite">
+      <div id="empty" class="empty">Start a conversation</div>
+    </div>
+  </section>
+
+  <form id="form" class="composer">
+    <div id="attachmentTray" class="attachment-tray" aria-live="polite"></div>
+    <div class="composer-row">
+      <input class="file-input" type="file" id="fileInput" accept=".txt,.md,.markdown,text/plain,text/markdown">
+      <input class="file-input" type="file" id="imageInput" accept="image/png,image/jpeg,image/gif,image/webp">
+
+      <button class="icon-button" type="button" id="fileButton" aria-label="Upload file" title="Upload file">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M13.5 6.5 7.2 12.8a3.4 3.4 0 1 0 4.8 4.8l7-7a5 5 0 0 0-7.1-7.1l-7.2 7.2a6.5 6.5 0 0 0 9.2 9.2l6.4-6.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      </button>
+
+      <button class="icon-button" type="button" id="imageButton" aria-label="Upload image" title="Upload image">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8"></rect>
+          <path d="m7 16 4-4 3 3 2-2 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="9" cy="9" r="1.4" fill="currentColor"></circle>
+        </svg>
+      </button>
+
+      <div class="input-wrap">
+        <label class="sr-only" for="messageInput">Message</label>
+        <input id="messageInput" class="message-input" type="text" placeholder="Ask a question..." autocomplete="off">
+      </div>
+
+      <button id="sendButton" class="send-button" type="submit">Send</button>
+    </div>
+  </form>
+</main>
+
+<script>
+(() => {
+  const log = document.getElementById("log");
+  const empty = document.getElementById("empty");
+  const form = document.getElementById("form");
+  const input = document.getElementById("messageInput");
+  const sendButton = document.getElementById("sendButton");
+  const fileInput = document.getElementById("fileInput");
+  const imageInput = document.getElementById("imageInput");
+  const fileButton = document.getElementById("fileButton");
+  const imageButton = document.getElementById("imageButton");
+  const tray = document.getElementById("attachmentTray");
+  const status = document.getElementById("status");
+
+  const messages = [];
+  let pendingAttachments = [];
+  let streaming = false;
+
+  fileButton.addEventListener("click", () => fileInput.click());
+  imageButton.addEventListener("click", () => imageInput.click());
+  fileInput.addEventListener("change", () => uploadSelected(fileInput, fileButton));
+  imageInput.addEventListener("change", () => uploadSelected(imageInput, imageButton));
+  form.addEventListener("submit", sendMessage);
+
+  function setStatus(text) {
+    status.textContent = text;
+  }
+
+  async function uploadSelected(control, button) {
+    const file = control.files && control.files[0];
+    control.value = "";
+    if (!file) return;
+
+    button.disabled = true;
+    button.classList.add("is-loading");
+    setStatus("Uploading");
+
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch("/api/uploads", { method: "POST", body });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Upload failed");
+      }
+      pendingAttachments.push(payload);
+      renderAttachmentTray();
+      setStatus("Ready");
+    } catch (err) {
+      setStatus(err.message || "Upload failed");
+    } finally {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+      input.focus();
+    }
+  }
+
+  async function sendMessage(event) {
+    event.preventDefault();
+    if (streaming) return;
+
+    const text = input.value.trim();
+    if (!text && pendingAttachments.length === 0) return;
+
+    const attachments = pendingAttachments;
+    const userContent = buildUserContent(text, attachments);
+    addMessage("user", text || "已上传附件", attachments);
+    messages.push({ role: "user", content: userContent });
+
+    input.value = "";
+    pendingAttachments = [];
+    renderAttachmentTray();
+
+    const assistant = addMessage("assistant", "");
+    streaming = true;
+    sendButton.disabled = true;
+    setStatus("Thinking");
+
+    try {
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages }),
+      });
+      if (!response.ok || !response.body) {
+        const text = await response.text();
+        throw new Error(text || "Chat request failed");
+      }
+
+      const state = { content: "" };
+      await readSSE(response.body, (eventName, data) => {
+        if (eventName === "delta") {
+          const delta = JSON.parse(data);
+          state.content += delta;
+          updateAssistant(assistant, state.content);
+        }
+        if (eventName === "error") {
+          throw new Error(JSON.parse(data));
+        }
+      });
+
+      messages.push({ role: "assistant", content: state.content });
+      setStatus("Ready");
+    } catch (err) {
+      updateAssistant(assistant, err.message || "请求失败");
+      setStatus("Error");
+    } finally {
+      streaming = false;
+      sendButton.disabled = false;
+      input.focus();
+    }
+  }
+
+  async function readSSE(body, onEvent) {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const parsed = parseEvent(block);
+        if (parsed) onEvent(parsed.event, parsed.data);
+      }
+    }
+  }
+
+  function parseEvent(block) {
+    let eventName = "message";
+    const data = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+    }
+    if (!data.length) return null;
+    return { event: eventName, data: data.join("\n") };
+  }
+
+  function buildUserContent(text, attachments) {
+    if (!attachments.length) return text;
+    const lines = attachments.map((item) => {
+      if (item.kind === "document") {
+        const state = item.ingested ? `ingested ${item.chunks || 0} chunks` : "saved";
+        return `- document: ${item.name} (${item.contentType}, ${state})`;
+      }
+      return `- image: ${item.name} (${item.contentType}, ${item.url || "uploaded"})`;
+    });
+    return `${text || "请结合附件继续。"}\n\nUploaded attachments:\n${lines.join("\n")}`;
+  }
+
+  function addMessage(role, content, attachments = []) {
+    empty?.remove();
+
+    const row = document.createElement("article");
+    row.className = `message ${role}`;
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = role === "user" ? "U" : "AI";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    if (role === "assistant") {
+      bubble.innerHTML = renderMarkdown(content || "...");
+    } else {
+      bubble.textContent = content;
+    }
+
+    if (attachments.length) {
+      bubble.appendChild(renderAttachmentList(attachments));
+    }
+
+    row.append(avatar, bubble);
+    log.appendChild(row);
+    scrollToBottom();
+    return bubble;
+  }
+
+  function updateAssistant(bubble, content) {
+    bubble.innerHTML = renderMarkdown(content || "...");
+    scrollToBottom();
+  }
+
+  function renderAttachmentTray() {
+    tray.innerHTML = "";
+    tray.dataset.visible = String(pendingAttachments.length > 0);
+    pendingAttachments.forEach((item, index) => {
+      const chip = document.createElement("div");
+      chip.className = "tray-chip";
+      chip.dataset.kind = item.kind;
+      chip.innerHTML = `<span>${escapeHTML(item.kind === "image" ? "Image" : "File")}</span><span class="attachment-name">${escapeHTML(item.name)}</span>`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove-attachment";
+      remove.setAttribute("aria-label", `Remove ${item.name}`);
+      remove.textContent = "x";
+      remove.addEventListener("click", () => {
+        pendingAttachments.splice(index, 1);
+        renderAttachmentTray();
+      });
+      chip.appendChild(remove);
+      tray.appendChild(chip);
+    });
+  }
+
+  function renderAttachmentList(items) {
+    const wrap = document.createElement("div");
+    wrap.className = "attachment-list";
+    for (const item of items) {
+      const node = document.createElement("span");
+      node.className = "attachment";
+      if (item.kind === "image" && item.url) {
+        const img = document.createElement("img");
+        img.src = item.url;
+        img.alt = "";
+        node.appendChild(img);
+      }
+      const name = document.createElement("span");
+      name.className = "attachment-name";
+      name.textContent = item.name;
+      node.appendChild(name);
+      wrap.appendChild(node);
+    }
+    return wrap;
+  }
+
+  function renderMarkdown(content) {
+    if (!content) return "";
+    if (window.marked && window.DOMPurify) {
+      return DOMPurify.sanitize(marked.parse(content));
+    }
+    return escapeHTML(content).replace(/\n/g, "<br>");
+  }
+
+  function escapeHTML(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function scrollToBottom() {
+    log.scrollTop = log.scrollHeight;
+  }
+})();
+</script>
+</body>
+</html>
