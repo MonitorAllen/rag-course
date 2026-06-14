@@ -40,6 +40,15 @@ func processOne(ctx context.Context, path string, opts Options, embedder llm.Emb
 }
 
 func ProcessContent(ctx context.Context, source string, content []byte, opts Options, embeder llm.Embedder, store vector.Store) (int, error) {
+	base := filepath.Base(source)
+	if !supportedFormat(base) {
+		return 0, fmt.Errorf("unsupported format: %s", filepath.Ext(base))
+	}
+
+	return ProcessText(ctx, base, string(content), opts, embeder, store, nil)
+}
+
+func ProcessText(ctx context.Context, source string, text string, opts Options, embeder llm.Embedder, store vector.Store, metadata map[string]string) (int, error) {
 	if embeder == nil {
 		return 0, errors.New("embedder is required")
 	}
@@ -49,8 +58,8 @@ func ProcessContent(ctx context.Context, source string, content []byte, opts Opt
 	}
 
 	base := filepath.Base(source)
-	if !supportedFormat(base) {
-		return 0, fmt.Errorf("unsupported format: %s", filepath.Ext(base))
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return 0, errors.New("source is required")
 	}
 
 	size := opts.ChunkSize
@@ -63,7 +72,7 @@ func ProcessContent(ctx context.Context, source string, content []byte, opts Opt
 		overlap = defaultChunkOverlap
 	}
 
-	text := strings.TrimSpace(string(content))
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return 0, errors.New("file is empty")
 	}
@@ -89,15 +98,20 @@ func ProcessContent(ctx context.Context, source string, content []byte, opts Opt
 	ingestedAt := time.Now().UTC().Format(time.RFC3339)
 	docs := make([]vector.Document, len(chunks))
 	for i, c := range chunks {
+		meta := map[string]string{
+			"source":      base,
+			"chunk_index": strconv.Itoa(i),
+			"chunks":      strconv.Itoa(len(chunks)),
+			"ingested_at": ingestedAt,
+		}
+		for k, v := range metadata {
+			meta[k] = v
+		}
+
 		docs[i] = vector.Document{
-			ID:      fmt.Sprintf("%s#%d", base, i),
-			Content: c,
-			Metadata: map[string]string{
-				"source":      base,
-				"chunk_index": strconv.Itoa(i),
-				"chunks":      strconv.Itoa(len(chunks)),
-				"ingested_at": ingestedAt,
-			},
+			ID:        fmt.Sprintf("%s#%d", base, i),
+			Content:   c,
+			Metadata:  meta,
 			Embedding: vectors[i],
 		}
 	}
@@ -115,7 +129,7 @@ func IsSupported(name string) bool {
 
 func supportedFormat(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".txt", ".md", ".markdown":
+	case ".txt", ".md":
 		return true
 	}
 	return false

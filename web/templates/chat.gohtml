@@ -40,7 +40,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -334,6 +335,153 @@ button:disabled {
   outline: none;
 }
 
+.upload-dialog {
+  width: min(100% - 32px, 620px);
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.26);
+}
+
+.upload-dialog::backdrop {
+  background: rgba(23, 32, 51, 0.42);
+}
+
+.dialog-panel {
+  display: grid;
+  gap: 18px;
+  padding: 30px;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 1.38rem;
+  line-height: 1.2;
+  font-weight: 780;
+}
+
+.dialog-field {
+  display: grid;
+  gap: 8px;
+}
+
+.dialog-label {
+  color: #41506a;
+  font-size: 0.94rem;
+  font-weight: 720;
+}
+
+.dialog-file-input {
+  width: 100%;
+  color: #26364f;
+}
+
+.dialog-file-input::file-selector-button {
+  min-height: 40px;
+  margin-right: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #172033;
+  padding: 0 18px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.dialog-file-input::file-selector-button:hover {
+  background: #e3edf8;
+}
+
+.description-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog-tool-button {
+  min-height: 34px;
+  border: 1px solid #c9d7ea;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #254064;
+  padding: 0 12px;
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.dialog-tool-button:hover {
+  border-color: #aebfd6;
+  background: #eef5ff;
+}
+
+.dialog-textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  border: 1px solid #cdd8e7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 13px 15px;
+  line-height: 1.5;
+  outline: 0;
+}
+
+.dialog-textarea::placeholder {
+  color: #99a5b8;
+}
+
+.dialog-textarea:focus-visible,
+.dialog-file-input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
+.dialog-error {
+  min-height: 20px;
+  color: #b42318;
+  font-size: 0.9rem;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.dialog-secondary,
+.dialog-primary {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 0 20px;
+  font-weight: 760;
+}
+
+.dialog-secondary {
+  border: 0;
+  background: transparent;
+  color: #4b5565;
+}
+
+.dialog-secondary:hover {
+  background: #f1f5f9;
+}
+
+.dialog-primary {
+  border: 0;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.dialog-primary:hover {
+  background: var(--accent-strong);
+}
+
 .send-button {
   min-width: 78px;
   padding: 0 20px;
@@ -418,6 +566,25 @@ button:disabled {
     height: 44px;
   }
 
+  .dialog-panel {
+    padding: 22px;
+  }
+
+  .dialog-actions {
+    gap: 8px;
+  }
+
+  .description-label-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dialog-secondary,
+  .dialog-primary {
+    min-height: 42px;
+    padding: 0 16px;
+  }
+
   .send-button {
     min-width: 64px;
     padding: 0 12px;
@@ -449,8 +616,7 @@ button:disabled {
   <form id="form" class="composer">
     <div id="attachmentTray" class="attachment-tray" aria-live="polite"></div>
     <div class="composer-row">
-      <input class="file-input" type="file" id="fileInput" accept=".txt,.md,.markdown,text/plain,text/markdown">
-      <input class="file-input" type="file" id="imageInput" accept="image/png,image/jpeg,image/gif,image/webp">
+      <input class="file-input" type="file" id="fileInput" accept=".txt,.md,text/plain,text/markdown">
 
       <button class="icon-button" type="button" id="fileButton" aria-label="Upload file" title="Upload file">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -476,6 +642,34 @@ button:disabled {
   </form>
 </main>
 
+<dialog id="imageDialog" class="upload-dialog" aria-labelledby="imageDialogTitle">
+  <form id="imageDialogForm" class="dialog-panel" novalidate>
+    <h2 id="imageDialogTitle" class="dialog-title">Add an image</h2>
+
+    <div class="dialog-field">
+      <label class="dialog-label" for="imageDialogFile">Image file</label>
+      <input class="dialog-file-input" type="file" id="imageDialogFile" accept="image/png,image/jpeg,image/gif,image/webp" required>
+    </div>
+
+    <div class="dialog-field">
+      <div class="description-label-row">
+        <label class="dialog-label" for="imageDescription">Description</label>
+        {{if .CaptionEnabled}}
+        <button id="imageCaptionButton" class="dialog-tool-button" type="button">Auto describe</button>
+        {{end}}
+      </div>
+      <textarea id="imageDescription" class="dialog-textarea" placeholder="Describe what's in the image so it can be retrieved later." required></textarea>
+    </div>
+
+    <div id="imageDialogError" class="dialog-error" role="alert" aria-live="polite"></div>
+
+    <div class="dialog-actions">
+      <button id="imageDialogCancel" class="dialog-secondary" type="button">Cancel</button>
+      <button id="imageDialogSave" class="dialog-primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 (() => {
   const log = document.getElementById("log");
@@ -484,46 +678,102 @@ button:disabled {
   const input = document.getElementById("messageInput");
   const sendButton = document.getElementById("sendButton");
   const fileInput = document.getElementById("fileInput");
-  const imageInput = document.getElementById("imageInput");
   const fileButton = document.getElementById("fileButton");
   const imageButton = document.getElementById("imageButton");
   const tray = document.getElementById("attachmentTray");
   const status = document.getElementById("status");
+  const imageDialog = document.getElementById("imageDialog");
+  const imageDialogForm = document.getElementById("imageDialogForm");
+  const imageDialogFile = document.getElementById("imageDialogFile");
+  const imageDescription = document.getElementById("imageDescription");
+  const imageDialogCancel = document.getElementById("imageDialogCancel");
+  const imageDialogSave = document.getElementById("imageDialogSave");
+  const imageDialogError = document.getElementById("imageDialogError");
+  const imageCaptionButton = document.getElementById("imageCaptionButton");
 
   const messages = [];
-  let pendingAttachments = [];
   let streaming = false;
+  let imageDialogRestoreFocus = true;
 
   fileButton.addEventListener("click", () => fileInput.click());
-  imageButton.addEventListener("click", () => imageInput.click());
-  fileInput.addEventListener("change", () => uploadSelected(fileInput, fileButton));
-  imageInput.addEventListener("change", () => uploadSelected(imageInput, imageButton));
+  imageButton.addEventListener("click", openImageDialog);
+  fileInput.addEventListener("change", () => uploadSelected(fileInput, fileButton, "/api/uploads/files"));
+  imageDialogForm.addEventListener("submit", uploadImageFromDialog);
+  imageCaptionButton?.addEventListener("click", generateImageCaption);
+  imageDialogCancel.addEventListener("click", closeImageDialog);
+  imageDialog.addEventListener("click", (event) => {
+    if (event.target === imageDialog && !imageDialogSave.disabled) closeImageDialog();
+  });
+  imageDialog.addEventListener("cancel", (event) => {
+    if (imageDialogSave.disabled) event.preventDefault();
+  });
+  imageDialog.addEventListener("close", () => {
+    resetImageDialog();
+    if (imageDialogRestoreFocus) imageButton.focus();
+    imageDialogRestoreFocus = true;
+  });
   form.addEventListener("submit", sendMessage);
 
   function setStatus(text) {
     status.textContent = text;
   }
 
-  async function uploadSelected(control, button) {
+  function openImageDialog() {
+    resetImageDialog();
+    if (typeof imageDialog.showModal === "function") {
+      imageDialog.showModal();
+    } else {
+      imageDialog.setAttribute("open", "");
+    }
+    imageDialogFile.focus();
+  }
+
+  function closeImageDialog() {
+    if (typeof imageDialog.close === "function") {
+      imageDialog.close();
+    } else {
+      imageDialog.removeAttribute("open");
+      resetImageDialog();
+      imageButton.focus();
+    }
+  }
+
+  function resetImageDialog() {
+    imageDialogForm.reset();
+    imageDialogError.textContent = "";
+    imageDialogFile.removeAttribute("aria-invalid");
+    imageDescription.removeAttribute("aria-invalid");
+    setImageDialogBusy(false);
+  }
+
+  function setImageDialogBusy(isBusy) {
+    imageDialogFile.disabled = isBusy;
+    imageDescription.disabled = isBusy;
+    imageDialogCancel.disabled = isBusy;
+    imageDialogSave.disabled = isBusy;
+    if (imageCaptionButton) imageCaptionButton.disabled = isBusy;
+    imageButton.disabled = isBusy;
+    imageButton.classList.toggle("is-loading", isBusy);
+  }
+
+  function showImageDialogError(message, field) {
+    imageDialogError.textContent = message;
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  async function uploadSelected(control, button, endpoint) {
     const file = control.files && control.files[0];
     control.value = "";
     if (!file) return;
 
     button.disabled = true;
     button.classList.add("is-loading");
-    setStatus("Uploading");
 
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const response = await fetch("/api/uploads", { method: "POST", body });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || "Upload failed");
-      }
-      pendingAttachments.push(payload);
-      renderAttachmentTray();
-      setStatus("Ready");
+      await processUpload(file, endpoint);
     } catch (err) {
       setStatus(err.message || "Upload failed");
     } finally {
@@ -533,21 +783,102 @@ button:disabled {
     }
   }
 
+  async function generateImageCaption() {
+    imageDialogError.textContent = "";
+    imageDialogFile.removeAttribute("aria-invalid");
+    imageDescription.removeAttribute("aria-invalid");
+
+    const file = imageDialogFile.files && imageDialogFile.files[0];
+    if (!file) {
+      showImageDialogError("Choose an image file first", imageDialogFile);
+      return;
+    }
+
+    setImageDialogBusy(true);
+    imageCaptionButton.textContent = "Describing...";
+    setStatus("Generating image description");
+
+    try {
+      const body = new FormData();
+      body.append("image", file);
+      const response = await fetch("/api/caption", { method: "POST", body });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Caption failed");
+      }
+      imageDescription.value = (payload.description || "").trim();
+      if (!imageDescription.value) {
+        throw new Error("Caption response is empty");
+      }
+      setStatus("Image description generated");
+      imageDescription.focus();
+    } catch (err) {
+      showImageDialogError(err.message || "Caption failed", imageDescription);
+      setStatus(err.message || "Caption failed");
+    } finally {
+      setImageDialogBusy(false);
+      imageCaptionButton.textContent = "Auto describe";
+    }
+  }
+
+  async function uploadImageFromDialog(event) {
+    event.preventDefault();
+    imageDialogError.textContent = "";
+    imageDialogFile.removeAttribute("aria-invalid");
+    imageDescription.removeAttribute("aria-invalid");
+
+    const file = imageDialogFile.files && imageDialogFile.files[0];
+    const description = imageDescription.value.trim();
+    if (!file) {
+      showImageDialogError("Choose an image file", imageDialogFile);
+      return;
+    }
+    if (!description) {
+      showImageDialogError("Image description is required", imageDescription);
+      return;
+    }
+
+    setImageDialogBusy(true);
+    try {
+      await processUpload(file, "/api/uploads/images", { description });
+      imageDialogRestoreFocus = false;
+      closeImageDialog();
+      input.focus();
+    } catch (err) {
+      setImageDialogBusy(false);
+      showImageDialogError(err.message || "Upload failed", imageDescription);
+      setStatus(err.message || "Upload failed");
+    }
+  }
+
+  async function processUpload(file, endpoint, options = {}) {
+    setStatus("Processing upload");
+    const body = new FormData();
+    body.append("file", file);
+    if (options.description) {
+      body.append("description", options.description);
+    }
+    const response = await fetch(endpoint, { method: "POST", body });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Upload failed");
+    }
+    showUploadNotice(payload);
+    setStatus(`${payload.name || file.name} processed: ${payload.chunks || 0} chunks`);
+    return payload;
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     if (streaming) return;
 
     const text = input.value.trim();
-    if (!text && pendingAttachments.length === 0) return;
+    if (!text) return;
 
-    const attachments = pendingAttachments;
-    const userContent = buildUserContent(text, attachments);
-    addMessage("user", text || "已上传附件", attachments);
-    messages.push({ role: "user", content: userContent });
+    addMessage("user", text);
+    messages.push({ role: "user", content: text });
 
     input.value = "";
-    pendingAttachments = [];
-    renderAttachmentTray();
 
     const assistant = addMessage("assistant", "");
     streaming = true;
@@ -620,19 +951,7 @@ button:disabled {
     return { event: eventName, data: data.join("\n") };
   }
 
-  function buildUserContent(text, attachments) {
-    if (!attachments.length) return text;
-    const lines = attachments.map((item) => {
-      if (item.kind === "document") {
-        const state = item.ingested ? `ingested ${item.chunks || 0} chunks` : "saved";
-        return `- document: ${item.name} (${item.contentType}, ${state})`;
-      }
-      return `- image: ${item.name} (${item.contentType}, ${item.url || "uploaded"})`;
-    });
-    return `${text || "请结合附件继续。"}\n\nUploaded attachments:\n${lines.join("\n")}`;
-  }
-
-  function addMessage(role, content, attachments = []) {
+  function addMessage(role, content) {
     empty?.remove();
 
     const row = document.createElement("article");
@@ -650,10 +969,6 @@ button:disabled {
       bubble.textContent = content;
     }
 
-    if (attachments.length) {
-      bubble.appendChild(renderAttachmentList(attachments));
-    }
-
     row.append(avatar, bubble);
     log.appendChild(row);
     scrollToBottom();
@@ -665,47 +980,14 @@ button:disabled {
     scrollToBottom();
   }
 
-  function renderAttachmentTray() {
+  function showUploadNotice(payload) {
     tray.innerHTML = "";
-    tray.dataset.visible = String(pendingAttachments.length > 0);
-    pendingAttachments.forEach((item, index) => {
-      const chip = document.createElement("div");
-      chip.className = "tray-chip";
-      chip.dataset.kind = item.kind;
-      chip.innerHTML = `<span>${escapeHTML(item.kind === "image" ? "Image" : "File")}</span><span class="attachment-name">${escapeHTML(item.name)}</span>`;
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "remove-attachment";
-      remove.setAttribute("aria-label", `Remove ${item.name}`);
-      remove.textContent = "x";
-      remove.addEventListener("click", () => {
-        pendingAttachments.splice(index, 1);
-        renderAttachmentTray();
-      });
-      chip.appendChild(remove);
-      tray.appendChild(chip);
-    });
-  }
-
-  function renderAttachmentList(items) {
-    const wrap = document.createElement("div");
-    wrap.className = "attachment-list";
-    for (const item of items) {
-      const node = document.createElement("span");
-      node.className = "attachment";
-      if (item.kind === "image" && item.url) {
-        const img = document.createElement("img");
-        img.src = item.url;
-        img.alt = "";
-        node.appendChild(img);
-      }
-      const name = document.createElement("span");
-      name.className = "attachment-name";
-      name.textContent = item.name;
-      node.appendChild(name);
-      wrap.appendChild(node);
-    }
-    return wrap;
+    tray.dataset.visible = "true";
+    const chip = document.createElement("div");
+    chip.className = "tray-chip";
+    chip.dataset.kind = payload.kind || "file";
+    chip.innerHTML = `<span>${escapeHTML(payload.kind === "image" ? "Image" : "File")}</span><span class="attachment-name">${escapeHTML(payload.name || "upload")}</span><span>${Number(payload.chunks || 0)} chunks</span>`;
+    tray.appendChild(chip);
   }
 
   function renderMarkdown(content) {

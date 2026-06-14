@@ -29,6 +29,13 @@ func formatContext(hits []vector.Result) string {
 		if source == "" {
 			source = unknownSource
 		}
+
+		if h.Metadata["type"] == "image" && h.Metadata["image_path"] != "" {
+			imagePath := h.Metadata["image_path"]
+			fmt.Fprintf(&sb, "[%d] 来源: %s [图片: %s] (相关性 %.2f)\n%s\n\n", i+1, source, imagePath, h.Score, h.Content)
+			continue
+		}
+
 		fmt.Fprintf(&sb, "[%d] 来源: %s (相关性 %.2f)\n%s\n\n", i+1, source, h.Score, h.Content)
 	}
 

@@ -52,7 +52,7 @@ func TestChatPageRendersComposerControls(t *testing.T) {
 		`id="log"`,
 		`id="messageInput"`,
 		`id="fileInput"`,
-		`id="imageInput"`,
+		`id="imageDialogFile"`,
 		`id="sendButton"`,
 		`Ask a question`,
 	} {
@@ -78,5 +78,62 @@ func TestChatPageSuppressesNativeInputFocusOutline(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, ".message-input:focus-visible") {
 		t.Fatal("chat page should suppress native focus-visible outline on the text input")
+	}
+}
+
+func TestChatPageUsesSeparateUploadEndpointsWithoutAttachmentPromptInjection(t *testing.T) {
+	srv, err := New(nil, nil, nil, &Options{Title: "RAG Chat"})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`/api/uploads/files`, `/api/uploads/images`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("chat page missing upload endpoint %s", want)
+		}
+	}
+	for _, unwanted := range []string{`pendingAttachments`, `buildUserContent`} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("chat page should not keep upload data for chat prompt injection: found %s", unwanted)
+		}
+	}
+}
+
+func TestChatPageUsesImageUploadDialog(t *testing.T) {
+	srv, err := New(nil, nil, nil, &Options{Title: "RAG Chat"})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`id="imageDialog"`,
+		`id="imageDialogFile"`,
+		`id="imageDescription"`,
+		`id="imageDialogSave"`,
+		`id="imageDialogCancel"`,
+		`Describe what's in the image`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("chat page missing image dialog element %s", want)
+		}
+	}
+	if strings.Contains(body, "window.prompt") {
+		t.Fatal("chat page should collect image descriptions with the upload dialog, not window.prompt")
 	}
 }

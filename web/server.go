@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"rag-course/llm"
 	"rag-course/rag"
 	"rag-course/vector"
@@ -38,8 +40,8 @@ type Server struct {
 	embedder     llm.Embedder
 	retriever    *rag.Retriever
 	store        vector.Store
-	ProcessedDir string
-	images       string
+	processedDir string
+	imagesDir    string
 	tpl          *template.Template
 	system       string
 	title        string
@@ -65,8 +67,8 @@ func New(client *llm.Client, embedder llm.Embedder, retriever *rag.Retriever, op
 		embedder:     embedder,
 		retriever:    retriever,
 		store:        opts.Store,
-		ProcessedDir: opts.ProcessedDir,
-		images:       opts.ImagesDir,
+		processedDir: opts.ProcessedDir,
+		imagesDir:    opts.ImagesDir,
 		tpl:          tpl,
 		system:       readSystemPrompt(opts.SystemPromptFile),
 		title:        title,
@@ -77,10 +79,63 @@ func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Get("/chat", s.handleChatPage)
-	r.Post("/api/chat/stream", s.handleChatStream)
-	r.Post("/api/uploads", s.handleUpload)
-	r.Get("/uploads/images/{name}", s.handleImage)
+
+	r.Group(func(r chi.Router) {
+		r.Use(InjectionDefense)
+		r.Post("/api/chat/stream", s.handleChatStream)
+		r.Post("/api/uploads/files", s.handleFileUpload)
+		if s.imagesDir != "" {
+			r.Post("/api/uploads/images", s.handleImageUpload)
+		}
+	})
+
+	r.Handle("/uploads/images/*", http.StripPrefix("/uploads/images/", http.FileServer(http.Dir(s.imagesDir))))
+
+	if s.captionEnabled() {
+		r.Post("/api/caption", s.handleCaption)
+	}
+
 	return r
+}
+
+type captionResponse struct {
+	Description string `json:"description"`
+}
+
+func (s *Server) handleCaption(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		writeUploadError(w, err)
+		return
+	}
+
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		writeUploadError(w, err)
+		return
+	}
+	defer file.Close()
+
+	mime := header.Header.Get("Content-Type")
+	if !isImageUpload(filepath.Base(header.Filename), mime) {
+		writeJSON(w, http.StatusUnsupportedMediaType, jsonError{Error: "invalid image file type"})
+		return
+	}
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, jsonError{Error: "failed to read image file"})
+		return
+	}
+
+	description, err := s.client.DescribeImage(r.Context(), mime, content)
+	if err != nil {
+		log.Printf("[web] failed to describe image: %v", err)
+		writeJSON(w, http.StatusInternalServerError, jsonError{Error: "failed to describe image"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, captionResponse{Description: description})
 }
 
 type chatRequest struct {
@@ -183,10 +238,15 @@ func withInlineContext(history []llm.Message, contextText string) []llm.Message 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.ExecuteTemplate(w, "chat.gohtml", map[string]any{
-		"Title": s.title,
+		"Title":          s.title,
+		"CaptionEnabled": s.captionEnabled(),
 	}); err != nil {
 		log.Printf("[web] template error: %v", err)
 	}
+}
+
+func (s *Server) captionEnabled() bool {
+	return s.client != nil && s.client.HasVision()
 }
 
 func (s *Server) Run(ctx context.Context, addr string) error {

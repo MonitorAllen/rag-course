@@ -14,96 +14,117 @@ import (
 	"rag-course/ingest"
 	"strings"
 	"unicode"
-
-	"github.com/go-chi/chi/v5"
 )
 
 const maxUploadBytes int64 = 12 << 20
 
 type fileUploadResponse struct {
-	ID          string `json:"id"`
 	Name        string `json:"name"`
 	StoredName  string `json:"storedName"`
 	Kind        string `json:"kind"`
 	ContentType string `json:"contentType"`
 	Size        int64  `json:"size"`
 	URL         string `json:"url,omitempty"`
-	Ingested    bool   `json:"ingested"`
 	Chunks      int    `json:"chunks,omitempty"`
+	Message     string `json:"message"`
 }
 
 type jsonError struct {
 	Error string `json:"error"`
 }
 
-func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
+	if !s.canIngest() {
+		http.Error(w, "ingest is not configured (no vector store)", http.StatusServiceUnavailable)
+		return
+	}
+
+	data, name, contentType, err := s.readMultipartFile(w, r)
+	if err != nil {
+		writeUploadError(w, err)
+		return
+	}
+
+	if !ingest.IsSupported(name) {
+		writeJSON(w, http.StatusUnsupportedMediaType, jsonError{Error: "unsupported file type"})
+		return
+	}
+
+	resp, err := s.saveDocumentUpload(r, name, contentType, data)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, jsonError{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleImageUpload(w http.ResponseWriter, r *http.Request) {
+	if !s.canIngest() {
+		http.Error(w, "ingest is not configured (no vector store)", http.StatusServiceUnavailable)
+		return
+	}
+
+	data, name, contentType, err := s.readMultipartFile(w, r)
+	if err != nil {
+		writeUploadError(w, err)
+		return
+	}
+
+	if !isImageUpload(name, contentType) {
+		writeJSON(w, http.StatusUnsupportedMediaType, jsonError{Error: "unsupported image type"})
+		return
+	}
+
+	description := strings.TrimSpace(r.FormValue("description"))
+	if description == "" {
+		writeJSON(w, http.StatusBadRequest, jsonError{Error: "image description is required"})
+		return
+	}
+
+	resp, err := s.saveImageUpload(r, name, contentType, data, description)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, jsonError{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) canIngest() bool {
+	return s.embedder != nil && s.store != nil
+}
+
+var errUploadTooLarge = errors.New("upload too large")
+var errInvalidMultipart = errors.New("invalid multipart upload")
+var errMissingFileField = errors.New("missing file field")
+var errEmptyUpload = errors.New("file is empty")
+
+func (s *Server) readMultipartFile(w http.ResponseWriter, r *http.Request) ([]byte, string, string, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
-		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "request body too large") {
-			status = http.StatusRequestEntityTooLarge
+			return nil, "", "", errUploadTooLarge
 		}
-		writeJSON(w, status, jsonError{Error: "invalid multipart upload"})
-		return
+		return nil, "", "", errInvalidMultipart
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, jsonError{Error: "missing file field"})
-		return
+		return nil, "", "", errMissingFileField
 	}
 	defer file.Close()
 
 	data, err := readUpload(file)
 	if err != nil {
-		if errors.Is(err, errUploadTooLarge) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, jsonError{Error: "file is too large"})
-			return
-		}
-		writeJSON(w, http.StatusBadRequest, jsonError{Error: "failed to read uploaded file"})
-		return
+		return nil, "", "", err
 	}
 	if len(data) == 0 {
-		writeJSON(w, http.StatusBadRequest, jsonError{Error: "file is empty"})
-		return
+		return nil, "", "", errEmptyUpload
 	}
 
 	name := cleanUploadName(header.Filename)
 	contentType := detectContentType(header.Header.Get("Content-Type"), data)
-
-	var resp fileUploadResponse
-	if isImageUpload(name, contentType) {
-		resp, err = s.saveImageUpload(name, contentType, data)
-	} else if ingest.IsSupported(name) {
-		resp, err = s.saveDocumentUpload(r, name, contentType, data)
-	} else {
-		writeJSON(w, http.StatusUnsupportedMediaType, jsonError{Error: "unsupported file type"})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, jsonError{Error: err.Error()})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return data, name, contentType, nil
 }
-
-func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
-	if s.images == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	name := chi.URLParam(r, "name")
-	if !isSafeStoredName(name) {
-		http.NotFound(w, r)
-		return
-	}
-
-	http.ServeFile(w, r, filepath.Join(s.images, name))
-}
-
-var errUploadTooLarge = errors.New("upload too large")
 
 func readUpload(r io.Reader) ([]byte, error) {
 	limited := io.LimitReader(r, maxUploadBytes+1)
@@ -117,68 +138,75 @@ func readUpload(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Server) saveImageUpload(name, contentType string, data []byte) (fileUploadResponse, error) {
-	if s.images == "" {
-		return fileUploadResponse{}, errors.New("image upload directory is not configured")
+func (s *Server) saveDocumentUpload(r *http.Request, name, contentType string, data []byte) (fileUploadResponse, error) {
+	if s.processedDir == "" {
+		return fileUploadResponse{}, errors.New("document upload directory is not configured")
 	}
-	if err := os.MkdirAll(s.images, 0o755); err != nil {
-		return fileUploadResponse{}, fmt.Errorf("create image directory: %w", err)
+	if err := os.MkdirAll(s.processedDir, 0o755); err != nil {
+		return fileUploadResponse{}, fmt.Errorf("create document directory: %w", err)
 	}
-
-	storedName, id, err := uniqueStoredName(name)
+	storedName, _, err := uniqueStoredName(name)
 	if err != nil {
 		return fileUploadResponse{}, err
 	}
-	if err := os.WriteFile(filepath.Join(s.images, storedName), data, 0o644); err != nil {
-		return fileUploadResponse{}, fmt.Errorf("save image: %w", err)
+	if err := os.WriteFile(filepath.Join(s.processedDir, storedName), data, 0o644); err != nil {
+		return fileUploadResponse{}, fmt.Errorf("save document: %w", err)
+	}
+	chunks, err := ingest.ProcessContent(r.Context(), storedName, data, ingest.Options{}, s.embedder, s.store)
+	if err != nil {
+		return fileUploadResponse{}, fmt.Errorf("ingest document: %w", err)
 	}
 
 	return fileUploadResponse{
-		ID:          id,
+		Name:        name,
+		StoredName:  storedName,
+		Kind:        "file",
+		ContentType: contentType,
+		Size:        int64(len(data)),
+		Chunks:      chunks,
+		Message:     fmt.Sprintf("Processed %s into %d chunks", name, chunks),
+	}, nil
+}
+
+func (s *Server) saveImageUpload(r *http.Request, name, contentType string, data []byte, description string) (fileUploadResponse, error) {
+	if s.imagesDir == "" {
+		return fileUploadResponse{}, errors.New("image upload directory is not configured")
+	}
+	if err := os.MkdirAll(s.imagesDir, 0o755); err != nil {
+		return fileUploadResponse{}, fmt.Errorf("create image directory: %w", err)
+	}
+
+	storedName, _, err := uniqueStoredName(name)
+	if err != nil {
+		return fileUploadResponse{}, err
+	}
+	if err := os.WriteFile(filepath.Join(s.imagesDir, storedName), data, 0o644); err != nil {
+		return fileUploadResponse{}, fmt.Errorf("save image: %w", err)
+	}
+
+	imageURL := "/uploads/images/" + url.PathEscape(storedName)
+	chunks, err := ingest.ProcessText(r.Context(), storedName, description, ingest.Options{}, s.embedder, s.store, map[string]string{
+		"type":          "image",
+		"kind":          "image",
+		"image_path":    imageURL,
+		"image_url":     imageURL,
+		"original_name": name,
+		"content_type":  contentType,
+	})
+	if err != nil {
+		return fileUploadResponse{}, fmt.Errorf("ingest image description: %w", err)
+	}
+
+	return fileUploadResponse{
 		Name:        name,
 		StoredName:  storedName,
 		Kind:        "image",
 		ContentType: contentType,
 		Size:        int64(len(data)),
-		URL:         "/uploads/images/" + url.PathEscape(storedName),
+		URL:         imageURL,
+		Chunks:      chunks,
+		Message:     fmt.Sprintf("Processed %s description into %d chunks", name, chunks),
 	}, nil
-}
-
-func (s *Server) saveDocumentUpload(r *http.Request, name, contentType string, data []byte) (fileUploadResponse, error) {
-	if s.ProcessedDir == "" {
-		return fileUploadResponse{}, errors.New("document upload directory is not configured")
-	}
-	if err := os.MkdirAll(s.ProcessedDir, 0o755); err != nil {
-		return fileUploadResponse{}, fmt.Errorf("create document directory: %w", err)
-	}
-
-	storedName, id, err := uniqueStoredName(name)
-	if err != nil {
-		return fileUploadResponse{}, err
-	}
-	if err := os.WriteFile(filepath.Join(s.ProcessedDir, storedName), data, 0o644); err != nil {
-		return fileUploadResponse{}, fmt.Errorf("save document: %w", err)
-	}
-
-	resp := fileUploadResponse{
-		ID:          id,
-		Name:        name,
-		StoredName:  storedName,
-		Kind:        "document",
-		ContentType: contentType,
-		Size:        int64(len(data)),
-	}
-
-	if s.embedder != nil && s.store != nil {
-		chunks, err := ingest.ProcessContent(r.Context(), storedName, data, ingest.Options{}, s.embedder, s.store)
-		if err != nil {
-			return fileUploadResponse{}, fmt.Errorf("ingest document: %w", err)
-		}
-		resp.Ingested = true
-		resp.Chunks = chunks
-	}
-
-	return resp, nil
 }
 
 func cleanUploadName(name string) string {
@@ -255,6 +283,19 @@ func isSafeStoredName(name string) bool {
 		return false
 	}
 	return !strings.Contains(name, "..")
+}
+
+func writeUploadError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errUploadTooLarge):
+		writeJSON(w, http.StatusRequestEntityTooLarge, jsonError{Error: "file is too large"})
+	case errors.Is(err, errMissingFileField):
+		writeJSON(w, http.StatusBadRequest, jsonError{Error: "missing file field"})
+	case errors.Is(err, errEmptyUpload):
+		writeJSON(w, http.StatusBadRequest, jsonError{Error: "file is empty"})
+	default:
+		writeJSON(w, http.StatusBadRequest, jsonError{Error: "invalid multipart upload"})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
