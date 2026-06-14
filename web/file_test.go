@@ -11,33 +11,146 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"rag-course/vector"
 )
 
 type uploadResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	StoredName  string `json:"storedName"`
-	Kind        string `json:"kind"`
-	ContentType string `json:"contentType"`
-	Size        int64  `json:"size"`
-	URL         string `json:"url"`
-	Ingested    bool   `json:"ingested"`
-	Chunks      int    `json:"chunks"`
+	Name       string `json:"name"`
+	StoredName string `json:"storedName"`
+	Kind       string `json:"kind"`
+	Chunks     int    `json:"chunks"`
+	URL        string `json:"url"`
+	Message    string `json:"message"`
 }
 
-func TestUploadImageSavesAndServesFile(t *testing.T) {
-	imageDir := t.TempDir()
-	srv := &Server{images: imageDir}
+func TestUploadFileIngestsSupportedDocument(t *testing.T) {
+	docDir := t.TempDir()
+	store := &captureStore{}
+	srv := &Server{
+		processedDir: docDir,
+		embedder:     fakeEmbedder{},
+		store:        store,
+	}
 
-	body, contentType := multipartBody(t, "file", "diagram.png", "image/png", []byte{
-		0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 'r', 'a', 'g',
+	body, contentType := multipartBody(t, []multipartPart{{
+		Field:       "file",
+		Filename:    "../notes.md",
+		ContentType: "text/markdown",
+		Data:        []byte("# RAG\n\nhello"),
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/uploads/files", body)
+	req.Header.Set("Content-Type", contentType)
+	rr := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("upload status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp uploadResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if resp.Kind != "file" {
+		t.Fatalf("kind = %q, want file", resp.Kind)
+	}
+	if resp.Name != "notes.md" {
+		t.Fatalf("name = %q, want sanitized base name", resp.Name)
+	}
+	if resp.Chunks != 1 {
+		t.Fatalf("chunks = %d, want 1", resp.Chunks)
+	}
+	if resp.Message == "" {
+		t.Fatal("success message is empty")
+	}
+	if _, err := os.Stat(filepath.Join(docDir, resp.StoredName)); err != nil {
+		t.Fatalf("stored document not found: %v", err)
+	}
+	if len(store.docs) != 1 {
+		t.Fatalf("upserted docs = %d, want 1", len(store.docs))
+	}
+	if store.docs[0].Metadata["source"] != resp.StoredName {
+		t.Fatalf("doc source = %q, want %q", store.docs[0].Metadata["source"], resp.StoredName)
+	}
+}
+
+func TestUploadFileRejectsUnsupportedDocumentType(t *testing.T) {
+	srv := &Server{
+		processedDir: t.TempDir(),
+		embedder:     fakeEmbedder{},
+		store:        &captureStore{},
+	}
+
+	body, contentType := multipartBody(t, []multipartPart{{
+		Field:       "file",
+		Filename:    "notes.pdf",
+		ContentType: "application/pdf",
+		Data:        []byte("%PDF"),
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/uploads/files", body)
+	req.Header.Set("Content-Type", contentType)
+	rr := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want %d; body = %s", rr.Code, http.StatusUnsupportedMediaType, rr.Body.String())
+	}
+}
+
+func TestUploadImageRequiresDescription(t *testing.T) {
+	srv := &Server{
+		imagesDir: t.TempDir(),
+		embedder:  fakeEmbedder{},
+		store:     &captureStore{},
+	}
+
+	body, contentType := multipartBody(t, []multipartPart{{
+		Field:       "file",
+		Filename:    "diagram.png",
+		ContentType: "image/png",
+		Data:        pngBytes(),
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/uploads/images", body)
+	req.Header.Set("Content-Type", contentType)
+	rr := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func TestUploadImageSavesFileAndIngestsDescription(t *testing.T) {
+	imageDir := t.TempDir()
+	store := &captureStore{}
+	srv := &Server{
+		imagesDir: imageDir,
+		embedder:  fakeEmbedder{},
+		store:     store,
+	}
+
+	body, contentType := multipartBody(t, []multipartPart{
+		{
+			Field:       "file",
+			Filename:    "../diagram.png",
+			ContentType: "image/png",
+			Data:        pngBytes(),
+		},
+		{
+			Field: "description",
+			Data:  []byte("A course architecture diagram."),
+		},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/uploads", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/uploads/images", body)
 	req.Header.Set("Content-Type", contentType)
 	rr := httptest.NewRecorder()
 
@@ -54,100 +167,53 @@ func TestUploadImageSavesAndServesFile(t *testing.T) {
 	if resp.Kind != "image" {
 		t.Fatalf("kind = %q, want image", resp.Kind)
 	}
-	if resp.URL == "" {
-		t.Fatal("image URL is empty")
-	}
-	if _, err := os.Stat(filepath.Join(imageDir, resp.StoredName)); err != nil {
-		t.Fatalf("stored image not found: %v", err)
-	}
-
-	getReq := httptest.NewRequest(http.MethodGet, resp.URL, nil)
-	getRR := httptest.NewRecorder()
-	srv.Routes().ServeHTTP(getRR, getReq)
-	if getRR.Code != http.StatusOK {
-		t.Fatalf("served image status = %d", getRR.Code)
-	}
-}
-
-func TestUploadDocumentSavesMarkdownWhenStoreUnavailable(t *testing.T) {
-	docDir := t.TempDir()
-	srv := &Server{ProcessedDir: docDir}
-
-	body, contentType := multipartBody(t, "file", "../notes.md", "text/markdown", []byte("# RAG\n\nhello"))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/uploads", body)
-	req.Header.Set("Content-Type", contentType)
-	rr := httptest.NewRecorder()
-
-	srv.Routes().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("upload status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	var resp uploadResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode upload response: %v", err)
-	}
-	if resp.Kind != "document" {
-		t.Fatalf("kind = %q, want document", resp.Kind)
-	}
-	if resp.Name != "notes.md" {
+	if resp.Name != "diagram.png" {
 		t.Fatalf("name = %q, want sanitized base name", resp.Name)
 	}
-	if resp.Ingested {
-		t.Fatal("document should not be marked ingested when store is unavailable")
-	}
-	if resp.StoredName == "" {
-		t.Fatal("storedName is empty")
-	}
-	if strings.Contains(resp.StoredName, "..") || strings.ContainsAny(resp.StoredName, `/\`) {
-		t.Fatalf("storedName is unsafe: %q", resp.StoredName)
-	}
-	if _, err := os.Stat(filepath.Join(docDir, resp.StoredName)); err != nil {
-		t.Fatalf("stored document not found: %v", err)
-	}
-}
-
-func TestUploadDocumentIngestsWhenStoreAvailable(t *testing.T) {
-	docDir := t.TempDir()
-	store := &captureStore{}
-	srv := &Server{
-		ProcessedDir: docDir,
-		embedder:     fakeEmbedder{},
-		store:        store,
-	}
-
-	body, contentType := multipartBody(t, "file", "notes.md", "text/markdown", []byte("# RAG\n\nhello"))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/uploads", body)
-	req.Header.Set("Content-Type", contentType)
-	rr := httptest.NewRecorder()
-
-	srv.Routes().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("upload status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	var resp uploadResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode upload response: %v", err)
-	}
-	if !resp.Ingested {
-		t.Fatal("document should be marked ingested")
+	if resp.URL == "" {
+		t.Fatal("image URL is empty")
 	}
 	if resp.Chunks != 1 {
 		t.Fatalf("chunks = %d, want 1", resp.Chunks)
 	}
+	if _, err := os.Stat(filepath.Join(imageDir, resp.StoredName)); err != nil {
+		t.Fatalf("stored image not found: %v", err)
+	}
 	if len(store.docs) != 1 {
 		t.Fatalf("upserted docs = %d, want 1", len(store.docs))
 	}
-	if store.deletedSource != resp.StoredName {
-		t.Fatalf("deleted source = %q, want %q", store.deletedSource, resp.StoredName)
+	doc := store.docs[0]
+	if doc.Content != "A course architecture diagram." {
+		t.Fatalf("embedded content = %q, want description", doc.Content)
 	}
-	if store.docs[0].Metadata["source"] != resp.StoredName {
-		t.Fatalf("doc source = %q, want %q", store.docs[0].Metadata["source"], resp.StoredName)
+	if doc.Metadata["kind"] != "image" {
+		t.Fatalf("metadata kind = %q, want image", doc.Metadata["kind"])
+	}
+	if doc.Metadata["type"] != "image" {
+		t.Fatalf("metadata type = %q, want image", doc.Metadata["type"])
+	}
+	if doc.Metadata["image_path"] != resp.URL {
+		t.Fatalf("metadata image_path = %q, want %q", doc.Metadata["image_path"], resp.URL)
+	}
+	if doc.Metadata["image_url"] != resp.URL {
+		t.Fatalf("metadata image_url = %q, want %q", doc.Metadata["image_url"], resp.URL)
+	}
+}
+
+func TestUploadedImagesAreServedByFileServer(t *testing.T) {
+	imageDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(imageDir, "diagram.png"), pngBytes(), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	srv := &Server{imagesDir: imageDir}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/images/diagram.png", nil)
+	rr := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("served image status = %d", rr.Code)
 	}
 }
 
@@ -188,20 +254,36 @@ func (s *captureStore) Close() error {
 	return nil
 }
 
-func multipartBody(t *testing.T, field, filename, contentType string, data []byte) (io.Reader, string) {
+type multipartPart struct {
+	Field       string
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+func multipartBody(t *testing.T, parts []multipartPart) (io.Reader, string) {
 	t.Helper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreatePart(textprotoMIMEHeader(map[string]string{
-		"Content-Disposition": `form-data; name="` + field + `"; filename="` + filename + `"`,
-		"Content-Type":        contentType,
-	}))
-	if err != nil {
-		t.Fatalf("create multipart part: %v", err)
-	}
-	if _, err := part.Write(data); err != nil {
-		t.Fatalf("write multipart part: %v", err)
+	for _, p := range parts {
+		header := map[string]string{
+			"Content-Disposition": `form-data; name="` + p.Field + `"`,
+		}
+		if p.Filename != "" {
+			header["Content-Disposition"] = `form-data; name="` + p.Field + `"; filename="` + p.Filename + `"`
+		}
+		if p.ContentType != "" {
+			header["Content-Type"] = p.ContentType
+		}
+
+		part, err := writer.CreatePart(textprotoMIMEHeader(header))
+		if err != nil {
+			t.Fatalf("create multipart part: %v", err)
+		}
+		if _, err := part.Write(p.Data); err != nil {
+			t.Fatalf("write multipart part: %v", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close multipart writer: %v", err)
@@ -215,4 +297,8 @@ func textprotoMIMEHeader(values map[string]string) textproto.MIMEHeader {
 		header.Set(k, v)
 	}
 	return header
+}
+
+func pngBytes() []byte {
+	return []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 'r', 'a', 'g'}
 }
